@@ -953,21 +953,23 @@ static const char *help_msg_ax[] = {
 	"ax", " addr [at]", "add code ref pointing to addr (from curseek)",
 	"ax-", " [at]", "clean all refs/refs from addr",
 	"ax-*", "", "clean all refs/refs",
+	"ax.", " [addr]", "find data/code references from and to this address",
 	"axc", " addr [at]", "add generic code ref",
 	"axC", " addr [at]", "add code call ref",
+	"axd", " addr [at]", "add data ref",
+	"axf", "[?] [addr]", "find data/code references from this address",
+	"axF", " [flg-glob]", "find data/code references of flags",
 	"axg", " [addr]", "show xrefs graph to reach current function",
 	"axg*", " [addr]", "show xrefs graph to given address, use .axg*;aggv",
 	"axgj", " [addr]", "show xrefs graph to reach current function in json format",
-	"axd", " addr [at]", "add data ref",
-	"axq", "", "list refs in quiet/human-readable format",
 	"axj", "", "list refs in json format",
-	"axF", " [flg-glob]", "find data/code references of flags",
-	"axm", " addr [at]", "copy data/code references pointing to addr to also point to curseek (or at)",
-	"axt", "[?] [addr]", "find data/code references to this address",
 	"axl", "[cq]", "list xrefs (axlc = count, axlq = quiet)",
-	"axf", "[?] [addr]", "find data/code references from this address",
+	"axm", " addr [at]", "copy data/code references pointing to addr to also point to curseek (or at)",
+	"axq", "", "list refs in quiet/human-readable format",
+	"axr", " addr [at]", "add data-read ref",
+	"axt", "[?] [addr]", "find data/code references to this address",
 	"axv", "[?] [addr]", "list local variables read-write-exec references",
-	"ax.", " [addr]", "find data/code references from and to this address",
+	"axw", " addr [at]", "add data-write ref",
 	"axff[j]", " [addr]", "find data/code references from this function",
 	"axs", " addr [at]", "add string ref",
 	NULL
@@ -4887,11 +4889,12 @@ int cmd_anal_fcn(RCore *core, const char *input) {
 							pj_end (pj);
 						} else {
 							r_cons_printf ("%c 0x%08" PFMT64x " -> ", ref->type, ref->at);
-							switch (ref->type) {
+							switch (R_ANAL_REF_TYPE_MASK (ref->type)) {
 							case R_ANAL_REF_TYPE_NULL:
 								r_cons_printf ("0x%08" PFMT64x " ", ref->addr);
 								break;
 							case R_ANAL_REF_TYPE_CODE:
+							case R_ANAL_REF_TYPE_JUMP:
 							case R_ANAL_REF_TYPE_CALL:
 							case R_ANAL_REF_TYPE_DATA:
 								r_cons_printf ("0x%08" PFMT64x " ", ref->addr);
@@ -4908,6 +4911,9 @@ int cmd_anal_fcn(RCore *core, const char *input) {
 									r_cons_printf ("%s\n", s);
 									free (s);
 								}
+								break;
+							default:
+								// ignore rwx
 								break;
 							}
 						}
@@ -8633,7 +8639,9 @@ static bool cmd_anal_refs(RCore *core, const char *input) {
 		//get all xrefs pointing to addr
 		list = r_anal_xrefs_get (core->anal, addr);
 		r_list_foreach (list, iter, ref) {
-			r_cons_printf ("0x%"PFMT64x" %s\n", ref->addr, r_anal_xrefs_type_tostring (ref->type));
+			r_cons_printf ("0x%"PFMT64x" %s %s\n", ref->addr, 
+				r_anal_xrefs_perm_tostring (ref),
+				r_anal_xrefs_type_tostring (ref->type));
 			r_anal_xrefs_set (core->anal, ref->addr, at, ref->type);
 		}
 		r_list_free (list);
@@ -8708,6 +8716,7 @@ static bool cmd_anal_refs(RCore *core, const char *input) {
 					pj_kn (pj, "from", ref->addr);
 					if (ref->type) {
 						pj_ks (pj, "type", r_anal_xrefs_type_tostring (ref->type));
+						pj_ks (pj, "perm", r_anal_xrefs_perm_tostring (ref));
 					}
 					pj_ks (pj, "opcode", str);
 					if (fcn) {
@@ -8795,8 +8804,9 @@ static bool cmd_anal_refs(RCore *core, const char *input) {
 						? r_str_newf ("%s; %s", fcn ?  fcn->name : "(nofunc)", comment)
 						: r_str_newf ("%s", fcn ? fcn->name : "(nofunc)");
 					free (print_comment);
-					r_cons_printf ("%s 0x%" PFMT64x " [%s] %s\n",
-						buf_fcn, ref->addr, r_anal_xrefs_type_tostring (ref->type), buf_asm);
+					r_cons_printf ("%s 0x%" PFMT64x " [%s %s] %s\n",
+						buf_fcn, ref->addr, r_anal_xrefs_type_tostring (ref->type), 
+						r_anal_xrefs_perm_tostring (ref), buf_asm);
 					free (buf_asm);
 					free (buf_fcn);
 				}
@@ -8973,6 +8983,8 @@ static bool cmd_anal_refs(RCore *core, const char *input) {
 		break;
 	case 'C': // "axC"
 	case 'c': // "axc"
+	case 'r': // "axr"
+	case 'w': // "axw"
 	case 'd': // "axd"
 	case 's': // "axs"
 	case ' ': // "ax "
